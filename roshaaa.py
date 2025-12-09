@@ -16,8 +16,28 @@ from aiogram.types import (
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
-API_TOKEN = os.getenv("API_TOKEN")   # BotFather dan token ENV orqali
-HR_CHAT_ID = int(os.getenv("HR_CHAT_ID", "-1003484007737"))  # default qo'yib qo'ydik, lekin ENVdan ham oladi
+from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+# ================== SOZLAMALAR ==================
+
+# Token va kanal ID ni ENV dan olamiz (Render’da Environment Variables orqali berasan)
+API_TOKEN = os.getenv("API_TOKEN")
+HR_CHAT_ID = int(os.getenv("HR_CHAT_ID", "-1003484007737"))
+
+if not API_TOKEN:
+    raise RuntimeError("API_TOKEN env o'zgaruvchisi o'rnatilmagan!")
+
+# Render Web Service uchun tashqi URL (masalan: https://roshaa-bot.onrender.com)
+BASE_WEBHOOK_URL = os.getenv("WEBHOOK_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL")
+if not BASE_WEBHOOK_URL:
+    # Render Web Service’da RENDER_EXTERNAL_URL avtomatik bo‘ladi,
+    # localda test qilsang, WEBHOOK_BASE_URL ni qo‘l bilan berishing kerak bo‘ladi.
+    raise RuntimeError("WEBHOOK_BASE_URL yoki RENDER_EXTERNAL_URL topilmadi.")
+
+# Webhook URL va path
+WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
+WEBHOOK_URL = BASE_WEBHOOK_URL.rstrip("/") + WEBHOOK_PATH
 
 logging.basicConfig(level=logging.INFO)
 
@@ -85,7 +105,6 @@ def department_keyboard(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-
 def nationality_keyboard(lang: str) -> ReplyKeyboardMarkup:
     if lang == "uz":
         labels = ["O‘zbek", "Rus", "Tojik", "Boshqa"]
@@ -108,7 +127,6 @@ def nationality_keyboard(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-
 def education_keyboard(lang: str) -> ReplyKeyboardMarkup:
     if lang == "uz":
         labels = ["Oliy", "Oliy / tugallanmagan", "O‘rta maxsus", "O‘rta"]
@@ -129,7 +147,6 @@ def education_keyboard(lang: str) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-
 
 
 def marital_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -159,7 +176,6 @@ def marital_keyboard(lang: str) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-
 
 
 def habits_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -192,7 +208,6 @@ def habits_keyboard(lang: str) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-
 
 
 def percent_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -252,7 +267,6 @@ def source_keyboard(lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-
 def shift_keyboard(lang: str) -> ReplyKeyboardMarkup:
     if lang == "uz":
         labels = ["Ertalab smena", "Kechqurun smena", "Aralash smena"]
@@ -270,7 +284,6 @@ def shift_keyboard(lang: str) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-
 
 
 def yesno_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -541,16 +554,14 @@ async def cmd_start(message: Message):
     first_name = message.from_user.first_name or ""
     greeting_text = (
         f"🇺🇿Assalomu alaykum {first_name}.\n"
-        f"Roshaa Market botiga xush kelibsiz!\n" 
+        f"Roshaa Market botiga xush kelibsiz!\n"
         f"Pastdan tilni tanlang:\n\n"
         f"🇷🇺Здравствуйте {first_name}.\n"
         f"Добро пожаловать в бот Roshaa Market!\n"
         f"Выберите язык внизу:"
-        
     )
 
     await message.answer(greeting_text, reply_markup=language_keyboard())
-
 
 
 @router.message(F.text.in_(["🇺🇿 O‘zbek", "🇷🇺 Русский"]))
@@ -1071,11 +1082,33 @@ async def final_cancel(callback: CallbackQuery):
         await callback.message.edit_text(cancel_text)
 
 
-# ================== MAIN ==================
+# ================== WEBHOOK SERVER (AIOHTTP + RENDER) ==================
 
-async def main():
-    await dp.start_polling(bot)
+async def on_startup(app: web.Application):
+    logging.info(f"Setting webhook to {WEBHOOK_URL}")
+    await bot.set_webhook(WEBHOOK_URL)
+
+
+async def on_shutdown(app: web.Application):
+    logging.info("Deleting webhook and closing bot session")
+    await bot.delete_webhook()
+    await bot.session.close()
+
+
+def main():
+    app = web.Application()
+
+    # Aiogram webhook handlerni ro'yxatdan o'tkazamiz
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    # Startup / shutdown hodisalari
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    port = int(os.getenv("PORT", "8000"))
+    web.run_app(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
