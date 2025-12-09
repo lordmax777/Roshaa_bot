@@ -1,1 +1,1 @@
-worker: python roshaaa.py
+web: python roshaaa.py
